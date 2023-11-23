@@ -9,7 +9,8 @@ from gymnasium.envs.toy_text.frozen_lake import generate_random_map
 
 from functions import Params,Qlearning,EpsilonGreedy, run_env
 from functions import postprocess , qtable_directions_map, plot_q_values_map, plot_states_actions_distribution
-from functions import create_custom_frozenlake,generate_custom_map, CustomFrozenLake
+from functions import create_custom_frozenlake,generate_custom_map, custom_step #, CustomFrozenLake
+from functions import tuple_to_grid_index
 
 
 sns.set_theme()
@@ -18,14 +19,14 @@ params = Params(
     total_episodes=2000,
     learning_rate=0.8,
     gamma=0.95,
-    epsilon=0.1,
+    epsilon=0.9,
     map_size=5,
     seed=123,
     is_slippery=False,
     n_runs=20,
     action_size=None,
     state_size=None,
-    proba_frozen=0.9,
+    proba_frozen=0,
     savefig_folder=Path("./output/"),
 )
 
@@ -41,8 +42,11 @@ custom_size = (5, 5)
 custom_holes = [(1, 1), (1, 3), (4, 2)]
 custom_goal = (2, 2)
 custom_start = (0, 0)
-custom_rewards = {(5, 7): 1}
+custom_rewards = {67: 1}
 env = create_custom_frozenlake(custom_size, custom_holes,custom_goal, custom_start)
+# Monkey patch the step function with the custom_step function
+env.original_step = env.step
+env.step = custom_step
 # env=CustomFrozenLake(custom_size, custom_holes, custom_goal, custom_start, custom_rewards, params.seed)
 
 params = params._replace(action_size=env.action_space.n)
@@ -74,13 +78,19 @@ custom_holes = [(1, 2), (1, 7),
                 (9, 2),(9, 3),(9, 4),(9, 7),(9, 8),(9, 9),
                 (10, 4),(10, 8),(10, 9)]
 custom_start = (5, 10)
-custom_goal = (5, 7)
-custom_rewards = {(5, 7): 1}
+custom_goal = (5, 6)
+custom_rewards = {tuple_to_grid_index(custom_goal,map_sizes[0]): 3}
+vertices = [(5, 6), (0, 11), (11, 11)]
+obstacle_vertices= [[(1, 7), (1, 9), (4, 9),(4,7)],
+                    [(7,7),(7,10),(10,10),(10,7)]]
+be_sneaky=True
 res_all = pd.DataFrame()
 st_all = pd.DataFrame()
 
 for map_size in map_sizes:
     env = create_custom_frozenlake(custom_size, custom_holes, custom_goal,custom_start)
+    env.original_step = env.step
+    env.step = custom_step
     # env = CustomFrozenLake(custom_size, custom_holes, custom_goal, custom_start, custom_rewards, params.seed)
 
     params = params._replace(action_size=env.action_space.n)
@@ -100,7 +110,9 @@ for map_size in map_sizes:
     )
 
     print(f"Map size: {map_size}x{map_size}")
-    rewards, steps, episodes, qtables, all_states, all_actions = run_env(env,params, learner,explorer)
+    rewards, steps, episodes, qtables, all_states, all_actions = run_env(env,params, learner,explorer,
+                                                                         custom_rewards,vertices,map_sizes[0],
+                                                                         obstacle_vertices,be_sneaky,custom_goal)
 
     # Save the results in dataframes
     res, st = postprocess(episodes, params, rewards, steps, map_size)
