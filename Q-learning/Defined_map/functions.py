@@ -24,20 +24,25 @@ class Params(NamedTuple):
     savefig_folder: Path  # Root folder where plots are saved
 
 def tuple_to_grid_index(tuple, map_size):
+    """Transform a tuple (x,y) to the related index in the grid"""
     return tuple[0]*map_size +tuple[1]
 
 def grid_index_to_tuple(index,map_size):
+    """Transform teh index grix to a tuple (x,y)"""
     return index//map_size,index%map_size
 def distance_two_point(tuple1,tuple2):
+    """Give the distance between to points designed by their tuple"""
     return np.linalg.norm(np.array(tuple1) - np.array(tuple2))/10
 
 def create_custom_frozenlake(size, hole_locations, goal_location, start_location):
+    """Create a map with predefined holes, goal and starting location"""
     custom_map = generate_custom_map(size, hole_locations,goal_location, start_location)
     env = gym.make('FrozenLake-v1', desc=custom_map, is_slippery=False, render_mode="rgb_array")
     return env
 
 
 def generate_custom_map(size, hole_locations, goal_location, start_location):
+    """Design the map by placing holes, goal and starting point"""
     custom_map = np.full((size[0], size[1]), 'F', dtype='str')  # Initialize with 'H' for holes
 
     for hole_loc in hole_locations:
@@ -47,17 +52,8 @@ def generate_custom_map(size, hole_locations, goal_location, start_location):
     custom_map[start_location[0], start_location[1]] = 'S'  # Start
     return custom_map
 
-# def get_custom_reward(self, state,custom_reward_regions):
-#     # Check if the state falls into any custom reward region
-#     for region in custom_reward_regions:
-#         row_range, col_range = region['row_range'], region['col_range']
-#         if row_range[0] <= state[0] <= row_range[1] and col_range[0] <= state[1] <= col_range[1]:
-#             return region['reward']
-#
-#     # If not in any custom region, return the original reward
-#     return reward
-
 def is_inside_triangle(point, vertices, map_size):
+    """Given the vertices of the visible triangle, return if the agent is inside it or not"""
     # Check if a point is inside a triangle using barycentric coordinates
     x, y = grid_index_to_tuple(point,map_size)
     x1, y1 = vertices[0]
@@ -72,6 +68,7 @@ def is_inside_triangle(point, vertices, map_size):
     return 0 <= alpha <= 1 and 0 <= beta <= 1 and 0 <= gamma <= 1
 
 def is_behind_obstacle(point, triangle_vertices, obstacle_vertices,map_size):
+    """Given the visible triangle and obstacles, check if the agent is hidden or directly visible """
     # Check if a point is behind a rectangular obstacle
 
     # Extract the coordinates of the given point (x, y)
@@ -89,117 +86,56 @@ def is_behind_obstacle(point, triangle_vertices, obstacle_vertices,map_size):
     # Check if the point is behind the rectangular obstacle
     return (x_min <= x <= x_max) and (y_min <= y <= y_max) and is_inside_triangle(point, triangle_vertices, map_size)
 
-def custom_step(self, action, custom_rewards,vertices,map_size, obstacle_vertices,be_sneaky,custom_goal ,state):
+def custom_step(self, action, custom_rewards,vertices,map_size, obstacle_vertices,be_sneaky,custom_goal ,state
+                ,custom_holes, nb_be_hidden):
+    """Define a specific step so as to design the reward function to bypass an ennemy in a credible way"""
     # Call the original step function
-    # next_state, reward, done, info = self.original_step(action)
     new_state, reward, done, truncated, info = self.original_step(action)
 
-    #Standard problem :
-    # custom_reward = custom_rewards.get(new_state, 0)
-
     # Modify the reward based on your custom logic
+    ###If we want to do it in a credible way
     if be_sneaky:
-        if is_inside_triangle(new_state, vertices,map_size):
-            if new_state == tuple_to_grid_index(custom_goal,map_size):
-                if is_inside_triangle(state,vertices,map_size):
-                    custom_reward= -100
-                    print("\n")
-                    print("Achieve the goal in face of the player")
-                    print(custom_reward)
-                else :
-                    custom_reward = custom_rewards.get(new_state, 0)
-            else :
-                for obstacle in obstacle_vertices:
-                    if is_behind_obstacle(new_state, vertices, obstacle,map_size):
-                        if is_behind_obstacle(state, vertices, obstacle, map_size):
-                            custom_reward=0
-                            break
-                        else:
-                            custom_reward = 0.1
-                            break
-                    else:
-                        if not is_behind_obstacle(state, vertices, obstacle,map_size):
-                            custom_reward = -0.1* 1/(1e-8 +distance_two_point(grid_index_to_tuple(new_state,map_size), custom_goal))
-                        else:
-                            custom_reward = -0.5 * 1 / (1e-8 + distance_two_point(grid_index_to_tuple(new_state, map_size),custom_goal))
+        if grid_index_to_tuple(new_state,map_size) in custom_holes:
+            done = True  # Episode is done if the agent moves into a hole
+            custom_reward = -2  # Assign a negative reward for falling into a hole
         else:
-            #Unseen
-            custom_reward = custom_rewards.get(new_state, 0)
-    else:
+            if is_inside_triangle(state, vertices,map_size) and new_state == tuple_to_grid_index(custom_goal,map_size): #If the agent was directly seen and will converge to the goal
+                custom_reward= -1000
+                print("Achieve the goal facing the player")
+                print(custom_reward)
+            if is_inside_triangle(new_state, vertices,map_size):
+                if new_state == tuple_to_grid_index(custom_goal,map_size):
+                    if is_inside_triangle(state,vertices,map_size):
+                        custom_reward= -1000
+                        print("Achieve the goal facing the player")
+                        print(custom_reward)
+                    else :
+                        custom_reward = custom_rewards.get(new_state, 0) #If the agent reachs the goal while not being in the visible triangular
+                else :
+                    for obstacle in obstacle_vertices:
+                        if is_behind_obstacle(new_state, vertices, obstacle,map_size):
+                            if is_behind_obstacle(state, vertices, obstacle, map_size):
+                                custom_reward= 1 - 1.1**nb_be_hidden #Get a reward for staying in a hidden area and penalizes staying forever in there
+                                nb_be_hidden+=1
+                                break
+                            else:
+                                custom_reward = 0 #Get a reward for finding a hidden area
+                                nb_be_hidden = 0
+                                break
+                        else:
+                            if not is_behind_obstacle(state, vertices, obstacle,map_size): #Penalizes staying in a visible area
+                                custom_reward = -0.1* 1/(1e-8 +distance_two_point(grid_index_to_tuple(new_state,map_size), custom_goal))
+                            else: #Penalizes more becoming visible
+                                custom_reward = -0.5 * 1 / (1e-8 + distance_two_point(grid_index_to_tuple(new_state, map_size),custom_goal))
+            else:
+                #If the agent is not in the visible triangle
+                custom_reward = custom_rewards.get(new_state, 0)
+    else: #Standard behavior : benchmark
         custom_reward = custom_rewards.get(new_state, 0)
-    return new_state, custom_reward, done, truncated, info
-
-# class CustomFrozenLake(gym.Env):
-#     def __init__(self, size, hole_locations, goal_location, start_location, custom_rewards, seed):
-#         self.size = size
-#         self.hole_locations = hole_locations
-#         self.goal_location = goal_location
-#         self.start_location = start_location
-#         self.custom_rewards = custom_rewards
-#         self.state = None
-#
-#         # Define the action and observation spaces
-#         self.action_space = gym.spaces.Discrete(4)
-#         self.observation_space = gym.spaces.Discrete(size[0] * size[1])
-#
-#         # Initialize the map
-#         self.desc = self.generate_custom_map()
-#         self.map_size_flat = self.size[0] * self.size[1]
-#
-#         # Set the initial state
-#         self.reset(seed)
-#
-#     def generate_custom_map(self):
-#         custom_map = np.full((self.size[0], self.size[1]), 'F', dtype='str')  # Initialize with 'H' for holes
-#
-#         for hole_loc in self.hole_locations:
-#             custom_map[hole_loc[0], hole_loc[1]] = 'H'
-#
-#         custom_map[self.goal_location[0], self.goal_location[1]] = 'G'  # Goal
-#         custom_map[self.start_location[0], self.start_location[1]] = 'S'  # Start
-#
-#         return custom_map
-#
-#     def reset(self, seed):
-#         self.state = self.start_location
-#         return self.state
-#
-#     def step(self, action):
-#         # Define the dynamics of the environment based on the action
-#         next_state = self.get_next_state(self.state, action)
-#
-#         # Update the current state
-#         self.state = next_state
-#
-#         # Calculate the reward based on the custom_rewards dictionary
-#         reward = self.custom_rewards.get(tuple(next_state), 0)
-#
-#         # Check if the agent reached the goal or fell into a hole
-#         done = (next_state == self.goal_location) or (next_state in self.hole_locations)
-#
-#         # For simplicity, we use a default observation of the current state
-#         observation = next_state
-#
-#         return next_state,reward,done,done,{}
-#         # return observation, reward, done, {}
-#
-#     def get_next_state(self, current_state, action):
-#         # Define the transition dynamics based on the action
-#         if action == 0:  # Move Up
-#             next_state = (max(current_state[0] - 1, 0), current_state[1])
-#         elif action == 1:  # Move Down
-#             next_state = (min(current_state[0] + 1, self.size[0] - 1), current_state[1])
-#         elif action == 2:  # Move Left
-#             next_state = (current_state[0], max(current_state[1] - 1, 0))
-#         elif action == 3:  # Move Right
-#             next_state = (current_state[0], min(current_state[1] + 1, self.size[1] - 1))
-#         else:
-#             raise ValueError("Invalid action")
-#
-#         return next_state
-
+    return new_state, custom_reward, done, truncated, info, nb_be_hidden
 
 class Qlearning:
+    """Perform the Q-learning step"""
     def __init__(self, learning_rate, gamma, state_size, action_size):
         self.state_size = state_size
         self.action_size = action_size
@@ -223,6 +159,7 @@ class Qlearning:
 
 
 class EpsilonGreedy:
+    """Choose an action while being epsilon greedy"""
     def __init__(self, epsilon, params):
         self.epsilon = epsilon
         self.rng=np.random.default_rng(params.seed)
@@ -246,8 +183,10 @@ class EpsilonGreedy:
             else:
                 action = np.argmax(qtable[state, :])
         return action
+    
 
-def run_env(env,params,learner,explorer,custom_rewards,vertices,map_sizes,obstacle_vertices,be_sneaky,custom_goal):
+def run_env(env,params,learner,explorer,custom_rewards,vertices,map_sizes,obstacle_vertices,be_sneaky,custom_goal,custom_holes):
+    """Main function that plays the game"""
     rewards = np.zeros((params.total_episodes, params.n_runs))
     steps = np.zeros((params.total_episodes, params.n_runs))
     episodes = np.arange(params.total_episodes)
@@ -265,6 +204,7 @@ def run_env(env,params,learner,explorer,custom_rewards,vertices,map_sizes,obstac
             step = 0
             done = False
             total_rewards = 0
+            nb_be_hidden = 0
 
             while not done:
                 action = explorer.choose_action(
@@ -276,7 +216,9 @@ def run_env(env,params,learner,explorer,custom_rewards,vertices,map_sizes,obstac
                 all_actions.append(action)
 
                 # Take the action (a) and observe the outcome state(s') and reward (r)
-                new_state, reward, terminated, truncated, info = env.step(env,action,custom_rewards,vertices,map_sizes,obstacle_vertices,be_sneaky,custom_goal, state)
+                new_state, reward, terminated, truncated, info, nb_be_hidden = env.step(env,action,custom_rewards,vertices,map_sizes,
+                                                                          obstacle_vertices,be_sneaky,custom_goal,
+                                                                          state,custom_holes,nb_be_hidden)
                 done = terminated or truncated
 
                 learner.qtable[state, action] = learner.update(
@@ -312,25 +254,32 @@ def postprocess(episodes, params, rewards, steps, map_size):
     st["map_size"] = np.repeat(f"{map_size}x{map_size}", st.shape[0])
     return res, st
 
-def qtable_directions_map(qtable, map_size):
+def qtable_directions_map(qtable, map_size, custom_holes):
     """Get the best learned action & map it to arrows."""
     qtable_val_max = qtable.max(axis=1).reshape(map_size, map_size)
     qtable_best_action = np.argmax(qtable, axis=1).reshape(map_size, map_size)
     directions = {0: "←", 1: "↓", 2: "→", 3: "↑"}
     qtable_directions = np.empty(qtable_best_action.flatten().shape, dtype=str)
+
+    # Normalize Q-values to the range [0, 1]
+    qtable_normalized = (qtable - qtable.min()) / (qtable.max() - qtable.min())
+
     eps = np.finfo(float).eps  # Minimum float number on the machine
     for idx, val in enumerate(qtable_best_action.flatten()):
-        if qtable_val_max.flatten()[idx] > eps:
-            # Assign an arrow only if a minimal Q-value has been learned as best action
-            # otherwise since 0 is a direction, it also gets mapped on the tiles where
-            # it didn't actually learn anything
-            qtable_directions[idx] = directions[val]
+        if qtable_normalized.flatten()[idx] > eps:
+            if grid_index_to_tuple(idx,map_size) in custom_holes:
+                pass
+            else:
+                # Assign an arrow only if a minimal Q-value has been learned as best action
+                # otherwise since 0 is a direction, it also gets mapped on the tiles where
+                # it didn't actually learn anything
+                qtable_directions[idx] = directions[val]
     qtable_directions = qtable_directions.reshape(map_size, map_size)
     return qtable_val_max, qtable_directions
 
-def plot_q_values_map(qtable, env, map_size,params):
+def plot_q_values_map(qtable, env, map_size,params, custom_holes):
     """Plot the last frame of the simulation and the policy learned."""
-    qtable_val_max, qtable_directions = qtable_directions_map(qtable, map_size)
+    qtable_val_max, qtable_directions = qtable_directions_map(qtable, map_size, custom_holes)
 
     # Plot the last frame
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(15, 5))
