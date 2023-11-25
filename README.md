@@ -1,5 +1,5 @@
 # Jumbo Mana Bypassing Solution
-![plot](./Q-Learning/Defined_map/output/sneaky_V4/good_results.png)
+![plot](./images/good_results.png)
 Illustration of the trajectory found by Q-Learning to bypass a target
 
 ## Installation
