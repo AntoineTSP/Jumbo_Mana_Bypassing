@@ -18,7 +18,7 @@ Illustration of the trajectory found by Q-Learning to bypass a target
 
 ## Results replication
 
-- Run the script main.py without changing any hyperparameters
+- Run the script main.py ( in Q-Learning folder) without changing any hyperparameters
 
 ## Solution on different map
 
